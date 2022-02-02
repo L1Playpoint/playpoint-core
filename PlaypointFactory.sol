@@ -4,51 +4,67 @@ pragma solidity ^0.8.0;
 import "./Helpers/ERC20.sol";
 import "./Helpers/SafeMath.sol";
 
+/**
+ * @title PlaypointFactory
+ * @dev PlaypointFactory is a base contract for managing a token crowdsale,
+ * allowing investors to purchase tokens with bnb. This contract implements
+ * such functionality in its most fundamental form and can be extended to provide additional
+ * functionality and/or custom behavior.
+ * The external interface represents the basic interface for purchasing tokens, and conform
+ * the base architecture for crowdsales. They are *not* intended to be modified / overriden.
+ * The internal interface conforms the extensible and modifiable surface of crowdsales. Override
+ * the methods to add functionality. Consider using 'super' where appropiate to concatenate
+ * behavior.
+ */
 contract PlaypointFactory {
     using SafeMath for uint256;
+    ERC20 public token;
+    address payable public wallet;
+    uint256 public rate;
 
     /**
      * Event for token purchase logging
      * @param purchaser who paid for the tokens
-     * @param beneficiary who got the tokens
      * @param value weis paid for purchase
      * @param amount amount of tokens purchased
      */
     event TokenPurchase(
         address indexed purchaser,
-        address indexed beneficiary,
         uint256 value,
         uint256 amount
     );
 
-    /// @dev The token being sold
-    ERC20 public token;
+    /**
+     * @param _rate Number of token units a buyer gets per wei
+     * @param _token Address of the token being sold
+     */
+    constructor(uint256 _rate, ERC20 _token) {
+        require(_rate > 0);
 
-    /// @dev Address where funds are collected
-    address payable public wallet;
-
-    constructor(address payable _wallet, ERC20 _token) {
-        // require(_wallet != address(0));
-        // require(_token != address(0));
-        wallet = _wallet;
+        rate = _rate;
+        wallet = payable(msg.sender);
         token = _token;
     }
 
     /**
-     * @dev Experimental Function
+     * @dev Validation of an incoming purchase. Use require statements to revert state when conditions are not met. Use super to concatenate validations.
+     * @param _weiAmount Value in wei involved in the purchase
      */
-    // bytes4 private constant SELECTOR =
-    //     bytes4(keccak256(bytes("transfer(address,uint256)")));
+    function _preValidatePurchase(uint256 _weiAmount) internal view {
+        require(msg.sender != address(0));
+        require(
+            _weiAmount >= 5 * 10**16,
+            "Minimum purchase amount is 0.05 BNB!"
+        );
+    }
 
-    // function _safeTransfer(address to, uint256 value) private {
-    //     (bool success, bytes memory data) = address(token).call(
-    //         abi.encodeWithSelector(SELECTOR, to, value)
-    //     );
-    //     require(
-    //         success && (data.length == 0 || abi.decode(data, (bool))),
-    //         "Playpoint: TRANSFER_FAILED"
-    //     );
-    // }
+    /**
+     * @dev Source of tokens. Override this method to modify the way in which the crowdsale ultimately gets and sends its tokens.
+     * @param _tokenAmount Number of tokens to be emitted
+     */
+    function _deliverTokens(uint256 _tokenAmount) internal {
+        token.transfer(payable(msg.sender), _tokenAmount);
+    }
 
     /**
      * @dev Override to extend the way in which ether is converted to tokens.
@@ -60,24 +76,11 @@ contract PlaypointFactory {
         view
         returns (uint256)
     {
-        // return _weiAmount.mul(rate);
+        return _weiAmount.mul(rate);
     }
 
     /**
-     * @dev Validation of an incoming purchase. Use require statements to revert state when conditions are not met. Use super to concatenate validations.
-     * @param _beneficiary Address performing the token purchase
-     * @param _weiAmount Value in wei involved in the purchase
-     */
-    function _preValidatePurchase(address _beneficiary, uint256 _weiAmount)
-        internal
-        pure
-    {
-        require(_beneficiary != address(0));
-        require(_weiAmount != 0);
-    }
-
-    /**
-     * @dev Determines how ETH is stored/forwarded on purchases.
+     * @dev Determines how BNB is stored/forwarded on purchases.
      */
     function _forwardFunds() internal {
         wallet.transfer(msg.value);
@@ -85,19 +88,23 @@ contract PlaypointFactory {
 
     /**
      * @dev low level token purchase ***DO NOT OVERRIDE***
-     * @param _beneficiary Address performing the token purchase
      */
-    function buyTokens(address _beneficiary) public payable {
+    function buyTokens() public payable {
         uint256 weiAmount = msg.value;
-        _preValidatePurchase(_beneficiary, weiAmount);
 
-        // calculate token amount to be created
+        _preValidatePurchase(weiAmount);
+
         uint256 tokens = _getTokenAmount(weiAmount);
 
-        token.transfer(_beneficiary, tokens);
+        _deliverTokens(tokens);
 
-        emit TokenPurchase(msg.sender, _beneficiary, weiAmount, tokens);
+        emit TokenPurchase(msg.sender, weiAmount, tokens);
 
         _forwardFunds();
+    }
+
+    function withdrawTokenToWallet(uint256 _amount) public {
+        require(msg.sender == wallet, "Only the wallet can withdraw tokens!");
+        token.transfer(wallet, _amount);
     }
 }
